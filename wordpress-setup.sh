@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# 워드프레스 도커 자동 설치 (MySQL 8.0 사용)
-# Oracle VM에 최적화
+# 워드프레스 도커 자동 설치 스크립트 (MySQL 8.0, 포트 80)
+# Oracle VM에 최적화된 버전
 
 # 루트 권한 확인
 if [ "$(id -u)" -ne 0 ]; then
@@ -102,6 +102,16 @@ else
     echo "Docker Compose가 이미 설치되어 있습니다."
 fi
 
+# 기존 워드프레스 설치 확인 및 제거
+if [ -d "/opt/wordpress" ]; then
+    echo -e "\n기존 워드프레스 설치를 제거합니다..."
+    cd /opt/wordpress
+    docker-compose down -v
+    cd /
+    rm -rf /opt/wordpress
+    echo "기존 워드프레스 설치가 제거되었습니다."
+fi
+
 # 워드프레스 디렉토리 생성
 echo -e "\n워드프레스 디렉토리 생성 중..."
 mkdir -p /opt/wordpress
@@ -150,10 +160,27 @@ volumes:
   wp_content:
 EOL
 
+# 설정 파일 백업
+echo -e "\n설정 파일 백업 중..."
+mkdir -p /opt/wordpress/backups
+cat > /opt/wordpress/backups/settings.txt << EOL
+# 워드프레스 설치 설정 (설치일: $(date))
+DB_ROOT_PASSWORD=${DB_ROOT_PASSWORD}
+DB_NAME=${DB_NAME}
+DB_USER=${DB_USER}
+DB_PASSWORD=${DB_PASSWORD}
+WP_PORT=${WP_PORT}
+EOL
+
 # 워드프레스 컨테이너 시작
 echo -e "\n워드프레스 컨테이너 시작 중..."
 cd /opt/wordpress
 docker-compose up -d
+
+# 컨테이너 상태 확인
+echo -e "\n컨테이너 상태 확인 중..."
+sleep 10
+docker-compose ps
 
 # 방화벽 설정
 echo -e "\n방화벽 설정 중..."
@@ -166,6 +193,11 @@ fi
 
 # 서버 IP 주소 가져오기
 SERVER_IP=$(hostname -I | awk '{print $1}')
+
+# 데이터베이스 연결 테스트
+echo -e "\n데이터베이스 연결 테스트 중..."
+sleep 10
+docker-compose exec -T db mysql -u root -p${DB_ROOT_PASSWORD} -e "SHOW DATABASES;" || echo "데이터베이스 연결 실패. 컨테이너가 완전히 시작될 때까지 잠시 기다려 주세요."
 
 # 설치 완료 메시지
 echo -e "\n===========================================
@@ -180,6 +212,7 @@ MySQL 버전: 8.0
 비밀번호: $DB_PASSWORD
 
 설정 파일 위치: /opt/wordpress/docker-compose.yml
+설정 백업 파일: /opt/wordpress/backups/settings.txt
 ===========================================
 
 도움말:
