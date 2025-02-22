@@ -127,14 +127,13 @@ services:
     image: mysql:8.0
     volumes:
       - db_data:/var/lib/mysql
-      - ./mysql-init:/docker-entrypoint-initdb.d
     restart: always
     environment:
       MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
       MYSQL_DATABASE: ${DB_NAME}
       MYSQL_USER: ${DB_USER}
       MYSQL_PASSWORD: ${DB_PASSWORD}
-    command: --default-authentication-plugin=mysql_native_password
+    command: '--default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci'
 
   wordpress:
     depends_on:
@@ -159,14 +158,6 @@ services:
 volumes:
   db_data:
   wp_content:
-EOL
-
-# MySQL 초기화 스크립트 생성
-mkdir -p /opt/wordpress/mysql-init
-cat > /opt/wordpress/mysql-init/init.sql << EOL
-CREATE USER IF NOT EXISTS '${DB_USER}'@'%' IDENTIFIED BY '${DB_PASSWORD}';
-GRANT ALL PRIVILEGES ON ${DB_NAME}.* TO '${DB_USER}'@'%';
-FLUSH PRIVILEGES;
 EOL
 
 # 설정 파일 백업
@@ -205,8 +196,20 @@ SERVER_IP=$(hostname -I | awk '{print $1}')
 
 # 데이터베이스 연결 테스트
 echo -e "\n데이터베이스 연결 테스트 중..."
-sleep 10
-docker-compose exec -T db mysql -u root -p${DB_ROOT_PASSWORD} -e "SHOW DATABASES;" || echo "데이터베이스 연결 실패. 컨테이너가 완전히 시작될 때까지 잠시 기다려 주세요."
+for i in {1..30}; do
+    if docker-compose exec -T db mysql -u root -p${DB_ROOT_PASSWORD} -e "SHOW DATABASES;" > /dev/null 2>&1; then
+        echo "데이터베이스 연결 성공!"
+        break
+    else
+        echo "데이터베이스 연결 대기 중... (시도 $i)"
+        sleep 5
+    fi
+done
+
+if [ $i -eq 30 ]; then
+    echo "데이터베이스 연결 실패. 컨테이너가 완전히 시작될 때까지 기다리세요."
+    exit 1
+fi
 
 # 설치 완료 메시지
 echo -e "\n===========================================
@@ -227,5 +230,15 @@ MySQL 버전: 8.0
 도움말:
 - 컨테이너 상태 확인: sudo docker-compose -f /opt/wordpress/docker-compose.yml ps
 - 컨테이너 중지: sudo docker-compose -f /opt/wordpress/docker-compose.yml stop
-- 컨테이너 시작: sudo
+- 컨테이너 시작: sudo docker-compose -f /opt/wordpress/docker-compose.yml start
+- 로그 확인: sudo docker-compose -f /opt/wordpress/docker-compose.yml logs
+"
+
+# 보안 팁 추가
+if [[ "$DB_ROOT_PASSWORD" == "rootpassword" || "$DB_PASSWORD" == "wordpress_password" ]]; then
+    echo -e "\n경고: 기본 비밀번호를 사용하고 있습니다. 보안을 위해 비밀번호를 변경하는 것을 권장합니다."
+fi
+
+# Oracle Cloud 포트 안내
+echo -e "\n참고: Oracle Cloud VM을 사용하는 경우 포트 $WP_PORT(HTTP 기본 포트)가 인그레스 규칙에서 허용되어 있는지 확인하세요."
 
