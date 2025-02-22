@@ -28,10 +28,10 @@ DB_ROOT_PASSWORD=${input:-$DB_ROOT_PASSWORD}
 read -p "워드프레스 데이터베이스 이름 [기본값: $DB_NAME]: " input
 DB_NAME=${input:-$DB_NAME}
 
-read -p "MySQL 사용자 이름 (루트 사용자로 사용될 이름) [기본값: $DB_USER]: " input
+read -p "워드프레스 데이터베이스 사용자 [기본값: $DB_USER]: " input
 DB_USER=${input:-$DB_USER}
 
-read -p "MySQL 사용자 비밀번호 [기본값: $DB_PASSWORD]: " input
+read -p "워드프레스 데이터베이스 비밀번호 [기본값: $DB_PASSWORD]: " input
 DB_PASSWORD=${input:-$DB_PASSWORD}
 
 # 입력 정보 확인
@@ -39,8 +39,8 @@ echo -e "\n===== 설정 정보 확인 ====="
 echo "스왑 파일 크기: $SWAP_SIZE (자동 설정)"
 echo "MySQL 루트 비밀번호: $DB_ROOT_PASSWORD"
 echo "워드프레스 데이터베이스 이름: $DB_NAME"
-echo "MySQL 사용자 이름: $DB_USER (루트 사용자로 사용)"
-echo "MySQL 사용자 비밀번호: $DB_PASSWORD"
+echo "워드프레스 데이터베이스 사용자: $DB_USER"
+echo "워드프레스 데이터베이스 비밀번호: $DB_PASSWORD"
 echo "워드프레스 웹 서버 포트: $WP_PORT (기본 HTTP 포트)"
 echo "MySQL 버전: 8.0 (최신 안정 버전)"
 
@@ -127,13 +127,14 @@ services:
     image: mysql:8.0
     volumes:
       - db_data:/var/lib/mysql
+      - ./mysql-init:/docker-entrypoint-initdb.d
     restart: always
     environment:
       MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
       MYSQL_DATABASE: ${DB_NAME}
-      MYSQL_USER: ${DB_USER}   # 루트 사용자로 사용될 사용자
-      MYSQL_PASSWORD: ${DB_PASSWORD} # 해당 사용자의 비밀번호 설정
-    command: '--default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci'
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    command: --default-authentication-plugin=mysql_native_password
 
   wordpress:
     depends_on:
@@ -146,8 +147,8 @@ services:
       - wp_content:/var/www/html/wp-content
     environment:
       WORDPRESS_DB_HOST: db:3306
-      WORDPRESS_DB_USER: ${DB_USER}  # DB_USER를 사용
-      WORDPRESS_DB_PASSWORD: ${DB_PASSWORD}  # DB_PASSWORD 사용
+      WORDPRESS_DB_USER: ${DB_USER}
+      WORDPRESS_DB_PASSWORD: ${DB_PASSWORD}
       WORDPRESS_DB_NAME: ${DB_NAME}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost"]
@@ -158,6 +159,14 @@ services:
 volumes:
   db_data:
   wp_content:
+EOL
+
+# MySQL 초기화 스크립트 생성
+mkdir -p /opt/wordpress/mysql-init
+cat > /opt/wordpress/mysql-init/init.sql << EOL
+CREATE USER IF NOT EXISTS '${DB_USER}'@'%' IDENTIFIED BY '${DB_PASSWORD}';
+GRANT ALL PRIVILEGES ON ${DB_NAME}.* TO '${DB_USER}'@'%';
+FLUSH PRIVILEGES;
 EOL
 
 # 설정 파일 백업
@@ -197,7 +206,7 @@ SERVER_IP=$(hostname -I | awk '{print $1}')
 # 데이터베이스 연결 테스트
 echo -e "\n데이터베이스 연결 테스트 중..."
 sleep 10
-docker-compose exec -T db mysql -u ${DB_USER} -p${DB_PASSWORD} -e "SHOW DATABASES;" || echo "데이터베이스 연결 실패. 컨테이너가 완전히 시작될 때까지 잠시 기다려 주세요."
+docker-compose exec -T db mysql -u root -p${DB_ROOT_PASSWORD} -e "SHOW DATABASES;" || echo "데이터베이스 연결 실패. 컨테이너가 완전히 시작될 때까지 잠시 기다려 주세요."
 
 # 설치 완료 메시지
 echo -e "\n===========================================
@@ -218,15 +227,5 @@ MySQL 버전: 8.0
 도움말:
 - 컨테이너 상태 확인: sudo docker-compose -f /opt/wordpress/docker-compose.yml ps
 - 컨테이너 중지: sudo docker-compose -f /opt/wordpress/docker-compose.yml stop
-- 컨테이너 시작: sudo docker-compose -f /opt/wordpress/docker-compose.yml start
-- 로그 확인: sudo docker-compose -f /opt/wordpress/docker-compose.yml logs
-"
-
-# 보안 팁 추가
-if [[ "$DB_ROOT_PASSWORD" == "rootpassword" || "$DB_PASSWORD" == "wordpress_password" ]]; then
-    echo -e "\n경고: 기본 비밀번호를 사용하고 있습니다. 보안을 위해 비밀번호를 변경하는 것을 권장합니다."
-fi
-
-# Oracle Cloud 포트 안내
-echo -e "\n참고: Oracle Cloud VM을 사용하는 경우 포트 $WP_PORT(HTTP 기본 포트)가 인그레스 규칙에서 허용되어 있는지 확인하세요."
+- 컨테이너 시작: sudo
 
