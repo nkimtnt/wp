@@ -1,4 +1,3 @@
-#!/bin/bash
 
 # 워드프레스 도커 자동 설치 스크립트 (MySQL 8.0, 포트 80)
 # Oracle VM에 최적화된 버전
@@ -10,12 +9,12 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 # 환경 변수 기본값 설정
-SWAP_SIZE="4G" # 스왑 사이즈는 고정값으로 설정
+SWAP_SIZE="4G"
 DB_ROOT_PASSWORD="rootpassword"
 DB_NAME="wordpress"
 DB_USER="wordpress"
 DB_PASSWORD="wordpress_password"
-WP_PORT="80" # 웹 서버 포트 80으로 설정
+WP_PORT="80"
 
 # 사용자 입력 받기
 echo "===== 워드프레스 도커 설치 설정 ====="
@@ -34,15 +33,14 @@ DB_USER=${input:-$DB_USER}
 read -p "워드프레스 데이터베이스 비밀번호 [기본값: $DB_PASSWORD]: " input
 DB_PASSWORD=${input:-$DB_PASSWORD}
 
-# 입력 정보 확인
+# 설정 정보 확인
 echo -e "\n===== 설정 정보 확인 ====="
-echo "스왑 파일 크기: $SWAP_SIZE (자동 설정)"
+echo "스왑 파일 크기: $SWAP_SIZE"
 echo "MySQL 루트 비밀번호: $DB_ROOT_PASSWORD"
 echo "워드프레스 데이터베이스 이름: $DB_NAME"
 echo "워드프레스 데이터베이스 사용자: $DB_USER"
 echo "워드프레스 데이터베이스 비밀번호: $DB_PASSWORD"
-echo "워드프레스 웹 서버 포트: $WP_PORT (기본 HTTP 포트)"
-echo "MySQL 버전: 8.0 (최신 안정 버전)"
+echo "워드프레스 웹 서버 포트: $WP_PORT"
 
 read -p "이 설정으로 계속하시겠습니까? (y/n) " confirm
 if [[ $confirm != [yY] && $confirm != [yY][eE][sS] ]]; then
@@ -53,6 +51,16 @@ fi
 # 시스템 업데이트
 echo -e "\n시스템 업데이트 중..."
 apt update && apt upgrade -y
+
+# 기본 도구 설치 (UFW 포함)
+echo -e "\n기본 도구 설치 중..."
+apt install -y apt-transport-https ca-certificates curl gnupg lsb-release software-properties-common ufw vim
+
+# 시간대 설정
+echo -e "\n시스템 시간대를 Asia/Seoul로 설정 중..."
+timedatectl set-timezone Asia/Seoul
+echo "현재 시스템 시간 설정:"
+timedatectl status
 
 # 스왑 파일 생성
 echo -e "\n$SWAP_SIZE 스왑 파일 생성 중..."
@@ -69,14 +77,6 @@ if [ ! -f /swapfile ]; then
 else
     echo "스왑 파일이 이미 존재합니다."
 fi
-
-# 스왑 상태 확인
-echo -e "\n스왑 상태:"
-free -h
-
-# 기본 도구 설치
-echo -e "\n기본 도구 설치 중..."
-apt install -y apt-transport-https ca-certificates curl gnupg lsb-release software-properties-common
 
 # 도커 설치
 echo -e "\n도커 설치 중..."
@@ -102,20 +102,14 @@ else
     echo "Docker Compose가 이미 설치되어 있습니다."
 fi
 
-# 기존 워드프레스 설치 확인 및 제거
-if [ -d "/opt/wordpress" ]; then
-    echo -e "\n기존 워드프레스 설치를 제거합니다..."
-    cd /opt/wordpress
-    docker-compose down -v
-    cd /
-    rm -rf /opt/wordpress
-    echo "기존 워드프레스 설치가 제거되었습니다."
-fi
-
-# 워드프레스 디렉토리 생성
+# 워드프레스 디렉토리 생성 및 준비
 echo -e "\n워드프레스 디렉토리 생성 중..."
-mkdir -p /opt/wordpress
-cd /opt/wordpress
+mkdir -p /opt/wordpress/wp-content
+chmod 755 /opt/wordpress/wp-content
+chown www-data:www-data /opt/wordpress/wp-content
+
+# 서버 IP 주소 가져오기
+SERVER_IP=$(hostname -I | awk '{print $1}')
 
 # Docker Compose 구성 파일 생성
 echo -e "\nDocker Compose 구성 파일 생성 중..."
@@ -133,8 +127,10 @@ services:
       MYSQL_DATABASE: ${DB_NAME}
       MYSQL_USER: ${DB_USER}
       MYSQL_PASSWORD: ${DB_PASSWORD}
-    command: '--default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci'
-
+    command:
+      - --default-authentication-plugin=caching_sha2_password
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
   wordpress:
     depends_on:
       - db
@@ -143,12 +139,16 @@ services:
       - "${WP_PORT}:80"
     restart: always
     volumes:
-      - wp_content:/var/www/html/wp-content
+      - ./wp-content:/var/www/html/wp-content
     environment:
       WORDPRESS_DB_HOST: db:3306
       WORDPRESS_DB_USER: ${DB_USER}
       WORDPRESS_DB_PASSWORD: ${DB_PASSWORD}
       WORDPRESS_DB_NAME: ${DB_NAME}
+      WORDPRESS_CONFIG_EXTRA: |
+        define('WP_HOME','http://${SERVER_IP}');
+        define('WP_SITEURL','http://${SERVER_IP}');
+    user: "www-data:www-data"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost"]
       interval: 1m
@@ -157,19 +157,6 @@ services:
 
 volumes:
   db_data:
-  wp_content:
-EOL
-
-# 설정 파일 백업
-echo -e "\n설정 파일 백업 중..."
-mkdir -p /opt/wordpress/backups
-cat > /opt/wordpress/backups/settings.txt << EOL
-# 워드프레스 설치 설정 (설치일: $(date))
-DB_ROOT_PASSWORD=${DB_ROOT_PASSWORD}
-DB_NAME=${DB_NAME}
-DB_USER=${DB_USER}
-DB_PASSWORD=${DB_PASSWORD}
-WP_PORT=${WP_PORT}
 EOL
 
 # 워드프레스 컨테이너 시작
@@ -177,37 +164,63 @@ echo -e "\n워드프레스 컨테이너 시작 중..."
 cd /opt/wordpress
 docker-compose up -d
 
-# 컨테이너 상태 확인
-echo -e "\n컨테이너 상태 확인 중..."
-sleep 10
-docker-compose ps
-
 # 방화벽 설정
 echo -e "\n방화벽 설정 중..."
-if command -v ufw &> /dev/null; then
-    ufw allow 22/tcp
-    ufw allow ${WP_PORT}/tcp
-    ufw --force enable
-    echo "방화벽이 설정되었습니다."
-fi
+# UFW 기본 설정
+ufw default deny incoming
+ufw default allow outgoing
+ufw allow 22/tcp
+ufw allow ${WP_PORT}/tcp
+ufw --force enable
+echo "방화벽이 설정되었습니다."
 
-# 서버 IP 주소 가져오기
-SERVER_IP=$(hostname -I | awk '{print $1}')
+# 권한 재설정
+echo -e "\n권한 설정 중..."
+chown -R www-data:www-data /opt/wordpress/wp-content
+chmod -R 755 /opt/wordpress/wp-content
 
-# 데이터베이스 연결 테스트
-echo -e "\n데이터베이스 연결 테스트 중..."
+# 데이터베이스 초기화 및 연결 테스트
+echo -e "\n데이터베이스 초기화 및 연결 테스트 중..."
+connection_successful=false
+
+# MySQL이 준비될 때까지 대기
 for i in {1..30}; do
-    if docker-compose exec -T db mysql -u root -p${DB_ROOT_PASSWORD} -e "SHOW DATABASES;" > /dev/null 2>&1; then
-        echo "데이터베이스 연결 성공!"
-        break
+    if docker-compose exec -T db mysqladmin ping -h localhost -u root -p${DB_ROOT_PASSWORD} --silent; then
+        echo "MySQL 서버가 응답합니다."
+        
+        # 데이터베이스 연결 테스트
+        if docker-compose exec -T db mysql -u root -p${DB_ROOT_PASSWORD} -e "SHOW DATABASES;" > /dev/null 2>&1; then
+            echo "데이터베이스 연결 성공!"
+            connection_successful=true
+            break
+        fi
     else
-        echo "데이터베이스 연결 대기 중... (시도 $i)"
+        echo "MySQL 서버 준비 대기 중... (시도 $i/30, 5초 간격)"
         sleep 5
     fi
 done
 
-if [ $i -eq 30 ]; then
-    echo "데이터베이스 연결 실패. 컨테이너가 완전히 시작될 때까지 기다리세요."
+if [ "$connection_successful" = false ]; then
+    echo "데이터베이스 연결 실패. 문제 해결을 위한 진단을 시작합니다..."
+    
+    # MySQL 상태 확인
+    echo "MySQL 컨테이너 상태:"
+    docker-compose ps db
+    
+    # MySQL 로그 확인
+    echo -e "\nMySQL 로그:"
+    docker-compose logs db
+    
+    # 네트워크 연결 확인
+    echo -e "\n네트워크 연결 상태:"
+    docker network ls
+    
+    echo -e "\n컨테이너를 중지하시겠습니까? (y/n)"
+    read -p "> " stop_containers
+    if [[ $stop_containers == [yY] ]]; then
+        docker-compose down
+        echo "컨테이너가 중지되었습니다."
+    fi
     exit 1
 fi
 
@@ -217,28 +230,21 @@ echo -e "\n===========================================
 브라우저에서 다음 주소로 접속하세요: http://$SERVER_IP
 
 MySQL 정보:
-MySQL 버전: 8.0
 루트 비밀번호: $DB_ROOT_PASSWORD
 데이터베이스: $DB_NAME
 사용자: $DB_USER
 비밀번호: $DB_PASSWORD
 
 설정 파일 위치: /opt/wordpress/docker-compose.yml
-설정 백업 파일: /opt/wordpress/backups/settings.txt
-===========================================
 
 도움말:
-- 컨테이너 상태 확인: sudo docker-compose -f /opt/wordpress/docker-compose.yml ps
-- 컨테이너 중지: sudo docker-compose -f /opt/wordpress/docker-compose.yml stop
-- 컨테이너 시작: sudo docker-compose -f /opt/wordpress/docker-compose.yml start
-- 로그 확인: sudo docker-compose -f /opt/wordpress/docker-compose.yml logs
+- 컨테이너 상태 확인: cd /opt/wordpress && sudo docker-compose ps
+- 컨테이너 중지: cd /opt/wordpress && sudo docker-compose stop
+- 컨테이너 시작: cd /opt/wordpress && sudo docker-compose start
+- 로그 확인: cd /opt/wordpress && sudo docker-compose logs
+- 권한 문제 발생 시: sudo chown -R www-data:www-data /opt/wordpress/wp-content
+===========================================
 "
-
-# 보안 팁 추가
-if [[ "$DB_ROOT_PASSWORD" == "rootpassword" || "$DB_PASSWORD" == "wordpress_password" ]]; then
-    echo -e "\n경고: 기본 비밀번호를 사용하고 있습니다. 보안을 위해 비밀번호를 변경하는 것을 권장합니다."
-fi
 
 # Oracle Cloud 포트 안내
 echo -e "\n참고: Oracle Cloud VM을 사용하는 경우 포트 $WP_PORT(HTTP 기본 포트)가 인그레스 규칙에서 허용되어 있는지 확인하세요."
-
