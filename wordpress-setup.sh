@@ -49,9 +49,10 @@ if [[ $confirm != [yY] && $confirm != [yY][eE][sS] ]]; then
     exit 1
 fi
 
-# 시스템 업데이트
-echo -e "\n시스템 업데이트 중..."
+# 시스템 업데이트 및 vim 설치
+echo -e "\n시스템 업데이트 및 vim 설치 중..."
 apt update && apt upgrade -y
+apt install -y vim
 
 # 시간대 설정
 echo -e "\n시스템 시간대를 Asia/Seoul로 설정 중..."
@@ -79,21 +80,42 @@ fi
 echo -e "\n스왑 상태:"
 free -h
 
-# MySQL 8.0 설치
-echo -e "\nMySQL 8.0 설치 중..."
+# MySQL 8.0 설치 및 설정
+echo -e "\nMySQL 8.0 설치 및 설정 중..."
 apt install -y mysql-server-8.0
 
-# MySQL 보안 설정
+# MySQL 서비스 시작 및 활성화
+systemctl start mysql
+systemctl enable mysql
+
+# MySQL 초기 보안 설정
 echo -e "\nMySQL 보안 설정 중..."
-mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '$DB_ROOT_PASSWORD';"
-mysql -e "DELETE FROM mysql.user WHERE User='';"
-mysql -e "DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');"
-mysql -e "DROP DATABASE IF EXISTS test;"
-mysql -e "DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';"
-mysql -e "CREATE DATABASE $DB_NAME DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-mysql -e "CREATE USER '$DB_USER'@'localhost' IDENTIFIED BY '$DB_PASSWORD';"
-mysql -e "GRANT ALL PRIVILEGES ON $DB_NAME.* TO '$DB_USER'@'localhost';"
-mysql -e "FLUSH PRIVILEGES;"
+mysql --user=root <<_EOF_
+ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '${DB_ROOT_PASSWORD}';
+DELETE FROM mysql.user WHERE User='';
+DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');
+DROP DATABASE IF EXISTS test;
+DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';
+FLUSH PRIVILEGES;
+_EOF_
+
+# WordPress 데이터베이스 및 사용자 생성
+echo -e "\nWordPress 데이터베이스 생성 중..."
+mysql --user=root --password="${DB_ROOT_PASSWORD}" <<_EOF_
+CREATE DATABASE IF NOT EXISTS ${DB_NAME} DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASSWORD}';
+GRANT ALL PRIVILEGES ON ${DB_NAME}.* TO '${DB_USER}'@'localhost';
+FLUSH PRIVILEGES;
+_EOF_
+
+# MySQL 설정 테스트
+echo -e "\nMySQL 설정 테스트 중..."
+if mysql --user="${DB_USER}" --password="${DB_PASSWORD}" -e "USE ${DB_NAME}"; then
+    echo "MySQL 설정이 성공적으로 완료되었습니다."
+else
+    echo "MySQL 설정 중 오류가 발생했습니다."
+    exit 1
+fi
 
 # Apache 및 PHP 설치
 echo -e "\nApache 및 PHP 설치 중..."
@@ -115,6 +137,7 @@ cat > /etc/apache2/sites-available/wordpress.conf << EOL
 <VirtualHost *:80>
     ServerAdmin webmaster@localhost
     DocumentRoot /var/www/wordpress
+    ServerName localhost
     
     <Directory /var/www/wordpress>
         Options FollowSymLinks
@@ -135,6 +158,7 @@ tar xzvf latest.tar.gz
 rm -rf /var/www/wordpress
 mv wordpress /var/www/
 chown -R www-data:www-data /var/www/wordpress
+chmod -R 755 /var/www/wordpress
 
 # WordPress 설정 파일 생성
 echo -e "\nWordPress 설정 파일 생성 중..."
@@ -149,8 +173,21 @@ SECURITY_KEYS=$(curl -s https://api.wordpress.org/secret-key/1.1/salt/)
 sed -i "/put your unique phrase here/d" /var/www/wordpress/wp-config.php
 echo "$SECURITY_KEYS" >> /var/www/wordpress/wp-config.php
 
-# Apache 재시작
-echo -e "\nApache 설정 활성화 및 재시작 중..."
+# .htaccess 파일 생성
+echo -e "\n.htaccess 파일 생성 중..."
+cat > /var/www/wordpress/.htaccess << EOL
+<IfModule mod_rewrite.c>
+RewriteEngine On
+RewriteBase /
+RewriteRule ^index\.php$ - [L]
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule . /index.php [L]
+</IfModule>
+EOL
+
+# Apache 설정 활성화
+echo -e "\nApache 설정 활성화 중..."
 a2dissite 000-default.conf
 a2ensite wordpress.conf
 a2enmod rewrite
