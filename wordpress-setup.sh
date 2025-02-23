@@ -108,6 +108,9 @@ mkdir -p /opt/wordpress/wp-content
 chmod 755 /opt/wordpress/wp-content
 chown www-data:www-data /opt/wordpress/wp-content
 
+# 서버 IP 주소 가져오기
+SERVER_IP=$(hostname -I | awk '{print $1}')
+
 # Docker Compose 구성 파일 생성
 echo -e "\nDocker Compose 구성 파일 생성 중..."
 cat > /opt/wordpress/docker-compose.yml << EOL
@@ -124,7 +127,10 @@ services:
       MYSQL_DATABASE: ${DB_NAME}
       MYSQL_USER: ${DB_USER}
       MYSQL_PASSWORD: ${DB_PASSWORD}
-    command: '--default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci'
+    command: >
+      --default-authentication-plugin=caching_sha2_password
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
 
   wordpress:
     depends_on:
@@ -140,6 +146,9 @@ services:
       WORDPRESS_DB_USER: ${DB_USER}
       WORDPRESS_DB_PASSWORD: ${DB_PASSWORD}
       WORDPRESS_DB_NAME: ${DB_NAME}
+      WORDPRESS_CONFIG_EXTRA: |
+        define('WP_HOME','http://${SERVER_IP}');
+        define('WP_SITEURL','http://${SERVER_IP}');
     user: "www-data:www-data"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost"]
@@ -156,6 +165,30 @@ echo -e "\n워드프레스 컨테이너 시작 중..."
 cd /opt/wordpress
 docker-compose up -d
 
+# 데이터베이스 연결 테스트
+echo -e "\n데이터베이스 연결 테스트 중..."
+for i in {1..30}; do
+    if docker-compose exec -T db mysql -u root -p${DB_ROOT_PASSWORD} -e "SHOW DATABASES;" > /dev/null 2>&1; then
+        echo "데이터베이스 연결 성공!"
+        break
+    else
+        echo "데이터베이스 연결 대기 중... (시도 $i/30, 5초 간격)"
+        sleep 5
+    fi
+done
+
+if [ $i -eq 30 ]; then
+    echo "데이터베이스 연결 실패. 컨테이너를 중지하고 로그를 확인합니다."
+    docker-compose logs db
+    echo "컨테이너를 중지하시겠습니까? (y/n)"
+    read -p "> " stop_containers
+    if [[ $stop_containers == [yY] ]]; then
+        docker-compose down
+        echo "컨테이너가 중지되었습니다."
+    fi
+    exit 1
+fi
+
 # 방화벽 설정
 echo -e "\n방화벽 설정 중..."
 # UFW 기본 설정
@@ -166,30 +199,10 @@ ufw allow ${WP_PORT}/tcp
 ufw --force enable
 echo "방화벽이 설정되었습니다."
 
-# 서버 IP 주소 가져오기
-SERVER_IP=$(hostname -I | awk '{print $1}')
-
 # 권한 재설정
 echo -e "\n권한 설정 중..."
 chown -R www-data:www-data /opt/wordpress/wp-content
 chmod -R 755 /opt/wordpress/wp-content
-
-# 데이터베이스 연결 테스트
-echo -e "\n데이터베이스 연결 테스트 중..."
-for i in {1..30}; do
-    if docker-compose exec -T db mysql -u root -p${DB_ROOT_PASSWORD} -e "SHOW DATABASES;" > /dev/null 2>&1; then
-        echo "데이터베이스 연결 성공!"
-        break
-    else
-        echo "데이터베이스 연결 대기 중... (시도 $i)"
-        sleep 5
-    fi
-done
-
-if [ $i -eq 30 ]; then
-    echo "데이터베이스 연결 실패. 컨테이너가 완전히 시작될 때까지 기다리세요."
-    exit 1
-fi
 
 # 설치 완료 메시지
 echo -e "\n===========================================
