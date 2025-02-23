@@ -174,6 +174,23 @@ echo -e "\n권한 설정 중..."
 chown -R www-data:www-data /opt/wordpress/wp-content
 chmod -R 755 /opt/wordpress/wp-content
 
+# 데이터베이스 연결 테스트
+echo -e "\n데이터베이스 연결 테스트 중..."
+for i in {1..30}; do
+    if docker-compose exec -T db mysql -u root -p${DB_ROOT_PASSWORD} -e "SHOW DATABASES;" > /dev/null 2>&1; then
+        echo "데이터베이스 연결 성공!"
+        break
+    else
+        echo "데이터베이스 연결 대기 중... (시도 $i)"
+        sleep 5
+    fi
+done
+
+if [ $i -eq 30 ]; then
+    echo "데이터베이스 연결 실패. 컨테이너가 완전히 시작될 때까지 기다리세요."
+    exit 1
+fi
+
 # 설치 완료 메시지
 echo -e "\n===========================================
 워드프레스 설치가 완료되었습니다!
