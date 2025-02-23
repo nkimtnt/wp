@@ -180,26 +180,43 @@ echo -e "\n권한 설정 중..."
 chown -R www-data:www-data /opt/wordpress/wp-content
 chmod -R 755 /opt/wordpress/wp-content
 
-# 연결 상태를 추적하기 위한 변수
+# 데이터베이스 초기화 및 연결 테스트
+echo -e "\n데이터베이스 초기화 및 연결 테스트 중..."
 connection_successful=false
 
-echo -e "\n데이터베이스 연결 테스트 중..."
+# MySQL이 준비될 때까지 대기
 for i in {1..30}; do
-    if docker-compose exec -T db mysql -u root -p${DB_ROOT_PASSWORD} -e "SHOW DATABASES;" > /dev/null 2>&1; then
-        echo "데이터베이스 연결 성공!"
-        connection_successful=true
-        break
+    if docker-compose exec -T db mysqladmin ping -h localhost -u root -p${DB_ROOT_PASSWORD} --silent; then
+        echo "MySQL 서버가 응답합니다."
+        
+        # 데이터베이스 연결 테스트
+        if docker-compose exec -T db mysql -u root -p${DB_ROOT_PASSWORD} -e "SHOW DATABASES;" > /dev/null 2>&1; then
+            echo "데이터베이스 연결 성공!"
+            connection_successful=true
+            break
+        fi
     else
-        echo "데이터베이스 연결 대기 중... (시도 $i/30, 5초 간격)"
+        echo "MySQL 서버 준비 대기 중... (시도 $i/30, 5초 간격)"
         sleep 5
     fi
 done
 
-# 연결 상태 확인
 if [ "$connection_successful" = false ]; then
-    echo "데이터베이스 연결 실패. 컨테이너를 중지하고 로그를 확인합니다."
+    echo "데이터베이스 연결 실패. 문제 해결을 위한 진단을 시작합니다..."
+    
+    # MySQL 상태 확인
+    echo "MySQL 컨테이너 상태:"
+    docker-compose ps db
+    
+    # MySQL 로그 확인
+    echo -e "\nMySQL 로그:"
     docker-compose logs db
-    echo "컨테이너를 중지하시겠습니까? (y/n)"
+    
+    # 네트워크 연결 확인
+    echo -e "\n네트워크 연결 상태:"
+    docker network ls
+    
+    echo -e "\n컨테이너를 중지하시겠습니까? (y/n)"
     read -p "> " stop_containers
     if [[ $stop_containers == [yY] ]]; then
         docker-compose down
@@ -207,9 +224,6 @@ if [ "$connection_successful" = false ]; then
     fi
     exit 1
 fi
-
-# 연결이 성공한 경우에만 계속 진행
-echo "데이터베이스 연결이 확인되었습니다. 다음 단계로 진행합니다."
 
 # 설치 완료 메시지
 echo -e "\n===========================================
