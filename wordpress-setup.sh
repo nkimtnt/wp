@@ -1,6 +1,6 @@
 
-# WordPress 설치 스크립트 (직접 설치 방식)
-# Ubuntu 22.04 LTS 미니멀 VM용
+# 워드프레스 도커 자동 설치 스크립트 (MySQL 8.0, 포트 80)
+# Oracle VM에 최적화된 버전
 
 # 루트 권한 확인
 if [ "$(id -u)" -ne 0 ]; then
@@ -17,7 +17,7 @@ DB_PASSWORD="wordpress_password"
 WP_PORT="80"
 
 # 사용자 입력 받기
-echo "===== 워드프레스 설치 설정 ====="
+echo "===== 워드프레스 도커 설치 설정 ====="
 echo "기본값을 사용하려면 입력 없이 Enter 키를 누르세요."
 
 # 데이터베이스 설정
@@ -48,10 +48,13 @@ if [[ $confirm != [yY] && $confirm != [yY][eE][sS] ]]; then
     exit 1
 fi
 
-# 시스템 업데이트 및 vim 설치
-echo -e "\n시스템 업데이트 및 vim 설치 중..."
+# 시스템 업데이트
+echo -e "\n시스템 업데이트 중..."
 apt update && apt upgrade -y
-apt install -y vim
+
+# 기본 도구 설치 (UFW 포함)
+echo -e "\n기본 도구 설치 중..."
+apt install -y apt-transport-https ca-certificates curl gnupg lsb-release software-properties-common ufw vim
 
 # 시간대 설정
 echo -e "\n시스템 시간대를 Asia/Seoul로 설정 중..."
@@ -75,135 +78,101 @@ else
     echo "스왑 파일이 이미 존재합니다."
 fi
 
-# 스왑 상태 확인
-echo -e "\n스왑 상태:"
-free -h
-
-# MySQL 8.0 설치 및 설정
-echo -e "\nMySQL 8.0 설치 및 설정 중..."
-apt install -y mysql-server-8.0
-
-# MySQL 서비스 시작 및 활성화
-systemctl start mysql
-systemctl enable mysql
-
-# MySQL 초기 보안 설정
-echo -e "\nMySQL 보안 설정 중..."
-mysql --user=root <<_EOF_
-ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '${DB_ROOT_PASSWORD}';
-DELETE FROM mysql.user WHERE User='';
-DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');
-DROP DATABASE IF EXISTS test;
-DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';
-FLUSH PRIVILEGES;
-_EOF_
-
-# WordPress 데이터베이스 및 사용자 생성
-echo -e "\nWordPress 데이터베이스 생성 중..."
-mysql --user=root --password="${DB_ROOT_PASSWORD}" <<_EOF_
-CREATE DATABASE IF NOT EXISTS ${DB_NAME} DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASSWORD}';
-GRANT ALL PRIVILEGES ON ${DB_NAME}.* TO '${DB_USER}'@'localhost';
-FLUSH PRIVILEGES;
-_EOF_
-
-# MySQL 설정 테스트
-echo -e "\nMySQL 설정 테스트 중..."
-if mysql --user="${DB_USER}" --password="${DB_PASSWORD}" -e "USE ${DB_NAME}"; then
-    echo "MySQL 설정이 성공적으로 완료되었습니다."
+# 도커 설치
+echo -e "\n도커 설치 중..."
+if ! command -v docker &> /dev/null; then
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+    apt update
+    apt install -y docker-ce docker-ce-cli containerd.io
+    systemctl enable docker
+    systemctl start docker
+    echo "도커가 설치되었습니다."
 else
-    echo "MySQL 설정 중 오류가 발생했습니다."
-    exit 1
+    echo "도커가 이미 설치되어 있습니다."
 fi
 
-# Apache 및 PHP 설치
-echo -e "\nApache 및 PHP 설치 중..."
-apt install -y apache2 \
-    php \
-    php-mysql \
-    php-curl \
-    php-gd \
-    php-intl \
-    php-mbstring \
-    php-soap \
-    php-xml \
-    php-xmlrpc \
-    php-zip
+# Docker Compose 설치
+echo -e "\nDocker Compose 설치 중..."
+if ! command -v docker-compose &> /dev/null; then
+    curl -L "https://github.com/docker/compose/releases/download/v2.20.3/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+    chmod +x /usr/local/bin/docker-compose
+    echo "Docker Compose가 설치되었습니다."
+else
+    echo "Docker Compose가 이미 설치되어 있습니다."
+fi
 
-# Apache 설정
-echo -e "\nApache 설정 중..."
-cat > /etc/apache2/sites-available/wordpress.conf << EOL
-<VirtualHost *:80>
-    ServerAdmin webmaster@localhost
-    DocumentRoot /var/www/wordpress
-    ServerName localhost
-    
-    <Directory /var/www/wordpress>
-        Options FollowSymLinks
-        AllowOverride All
-        Require all granted
-    </Directory>
-    
-    ErrorLog \${APACHE_LOG_DIR}/error.log
-    CustomLog \${APACHE_LOG_DIR}/access.log combined
-</VirtualHost>
+# 워드프레스 디렉토리 생성 및 준비
+echo -e "\n워드프레스 디렉토리 생성 중..."
+mkdir -p /opt/wordpress/wp-content
+chmod 755 /opt/wordpress/wp-content
+chown www-data:www-data /opt/wordpress/wp-content
+
+# Docker Compose 구성 파일 생성
+echo -e "\nDocker Compose 구성 파일 생성 중..."
+cat > /opt/wordpress/docker-compose.yml << EOL
+version: '3'
+
+services:
+  db:
+    image: mysql:8.0
+    volumes:
+      - db_data:/var/lib/mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME}
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    command: '--default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci'
+
+  wordpress:
+    depends_on:
+      - db
+    image: wordpress:latest
+    ports:
+      - "${WP_PORT}:80"
+    restart: always
+    volumes:
+      - ./wp-content:/var/www/html/wp-content
+    environment:
+      WORDPRESS_DB_HOST: db:3306
+      WORDPRESS_DB_USER: ${DB_USER}
+      WORDPRESS_DB_PASSWORD: ${DB_PASSWORD}
+      WORDPRESS_DB_NAME: ${DB_NAME}
+    user: "www-data:www-data"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+
+volumes:
+  db_data:
 EOL
 
-# WordPress 다운로드 및 설치
-echo -e "\nWordPress 다운로드 및 설치 중..."
-cd /tmp
-curl -O https://wordpress.org/latest.tar.gz
-tar xzvf latest.tar.gz
-rm -rf /var/www/wordpress
-mv wordpress /var/www/
-chown -R www-data:www-data /var/www/wordpress
-chmod -R 755 /var/www/wordpress
-
-# WordPress 설정 파일 생성
-echo -e "\nWordPress 설정 파일 생성 중..."
-cp /var/www/wordpress/wp-config-sample.php /var/www/wordpress/wp-config.php
-sed -i "s/database_name_here/$DB_NAME/" /var/www/wordpress/wp-config.php
-sed -i "s/username_here/$DB_USER/" /var/www/wordpress/wp-config.php
-sed -i "s/password_here/$DB_PASSWORD/" /var/www/wordpress/wp-config.php
-
-# WordPress 보안 키 생성 및 추가
-echo -e "\nWordPress 보안 키 생성 중..."
-SECURITY_KEYS=$(curl -s https://api.wordpress.org/secret-key/1.1/salt/)
-sed -i "/put your unique phrase here/d" /var/www/wordpress/wp-config.php
-echo "$SECURITY_KEYS" >> /var/www/wordpress/wp-config.php
-
-# .htaccess 파일 생성
-echo -e "\n.htaccess 파일 생성 중..."
-cat > /var/www/wordpress/.htaccess << EOL
-<IfModule mod_rewrite.c>
-RewriteEngine On
-RewriteBase /
-RewriteRule ^index\.php$ - [L]
-RewriteCond %{REQUEST_FILENAME} !-f
-RewriteCond %{REQUEST_FILENAME} !-d
-RewriteRule . /index.php [L]
-</IfModule>
-EOL
-
-# Apache 설정 활성화
-echo -e "\nApache 설정 활성화 중..."
-a2dissite 000-default.conf
-a2ensite wordpress.conf
-a2enmod rewrite
-systemctl restart apache2
+# 워드프레스 컨테이너 시작
+echo -e "\n워드프레스 컨테이너 시작 중..."
+cd /opt/wordpress
+docker-compose up -d
 
 # 방화벽 설정
 echo -e "\n방화벽 설정 중..."
-if command -v ufw &> /dev/null; then
-    ufw allow 22/tcp
-    ufw allow 80/tcp
-    ufw allow 443/tcp
-    ufw --force enable
-    echo "방화벽이 설정되었습니다."
-fi
+# UFW 기본 설정
+ufw default deny incoming
+ufw default allow outgoing
+ufw allow 22/tcp
+ufw allow ${WP_PORT}/tcp
+ufw --force enable
+echo "방화벽이 설정되었습니다."
 
 # 서버 IP 주소 가져오기
 SERVER_IP=$(hostname -I | awk '{print $1}')
+
+# 권한 재설정
+echo -e "\n권한 설정 중..."
+chown -R www-data:www-data /opt/wordpress/wp-content
+chmod -R 755 /opt/wordpress/wp-content
 
 # 설치 완료 메시지
 echo -e "\n===========================================
@@ -216,14 +185,15 @@ MySQL 정보:
 사용자: $DB_USER
 비밀번호: $DB_PASSWORD
 
-WordPress 설정 파일 위치: /var/www/wordpress/wp-config.php
-===========================================
+설정 파일 위치: /opt/wordpress/docker-compose.yml
 
 도움말:
-- Apache 상태 확인: systemctl status apache2
-- MySQL 상태 확인: systemctl status mysql
-- Apache 에러 로그: tail -f /var/log/apache2/error.log
-- Apache 액세스 로그: tail -f /var/log/apache2/access.log
+- 컨테이너 상태 확인: cd /opt/wordpress && sudo docker-compose ps
+- 컨테이너 중지: cd /opt/wordpress && sudo docker-compose stop
+- 컨테이너 시작: cd /opt/wordpress && sudo docker-compose start
+- 로그 확인: cd /opt/wordpress && sudo docker-compose logs
+- 권한 문제 발생 시: sudo chown -R www-data:www-data /opt/wordpress/wp-content
+===========================================
 "
 
 # 보안 팁 추가
