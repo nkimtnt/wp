@@ -1,0 +1,6 @@
+# macOS에서 자동 생성되는 파일 방지
+.DS_Store
+
+# 특정 폴더 내의 DS_Store도 무시
+**/.DS_Store
+

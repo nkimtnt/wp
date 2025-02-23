@@ -1,4 +1,3 @@
-#!/bin/bash
 
 # WordPress 설치 스크립트 (직접 설치 방식)
 # Ubuntu 22.04 LTS 미니멀 VM용
