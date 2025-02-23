@@ -127,11 +127,10 @@ services:
       MYSQL_DATABASE: ${DB_NAME}
       MYSQL_USER: ${DB_USER}
       MYSQL_PASSWORD: ${DB_PASSWORD}
-    command: >
-      --default-authentication-plugin=caching_sha2_password
-      --character-set-server=utf8mb4
-      --collation-server=utf8mb4_unicode_ci
-      --init-file=/docker-entrypoint-initdb.d/init.sql
+    command:
+      - --default-authentication-plugin=caching_sha2_password
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
   wordpress:
     depends_on:
       - db
