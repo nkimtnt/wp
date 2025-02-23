@@ -131,7 +131,7 @@ services:
       --default-authentication-plugin=caching_sha2_password
       --character-set-server=utf8mb4
       --collation-server=utf8mb4_unicode_ci
-
+      --init-file=/docker-entrypoint-initdb.d/init.sql
   wordpress:
     depends_on:
       - db
