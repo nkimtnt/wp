@@ -165,30 +165,6 @@ echo -e "\n워드프레스 컨테이너 시작 중..."
 cd /opt/wordpress
 docker-compose up -d
 
-# 데이터베이스 연결 테스트
-echo -e "\n데이터베이스 연결 테스트 중..."
-for i in {1..30}; do
-    if docker-compose exec -T db mysql -u root -p${DB_ROOT_PASSWORD} -e "SHOW DATABASES;" > /dev/null 2>&1; then
-        echo "데이터베이스 연결 성공!"
-        break
-    else
-        echo "데이터베이스 연결 대기 중... (시도 $i/30, 5초 간격)"
-        sleep 5
-    fi
-done
-
-if [ $i -eq 30 ]; then
-    echo "데이터베이스 연결 실패. 컨테이너를 중지하고 로그를 확인합니다."
-    docker-compose logs db
-    echo "컨테이너를 중지하시겠습니까? (y/n)"
-    read -p "> " stop_containers
-    if [[ $stop_containers == [yY] ]]; then
-        docker-compose down
-        echo "컨테이너가 중지되었습니다."
-    fi
-    exit 1
-fi
-
 # 방화벽 설정
 echo -e "\n방화벽 설정 중..."
 # UFW 기본 설정
@@ -203,6 +179,37 @@ echo "방화벽이 설정되었습니다."
 echo -e "\n권한 설정 중..."
 chown -R www-data:www-data /opt/wordpress/wp-content
 chmod -R 755 /opt/wordpress/wp-content
+
+# 연결 상태를 추적하기 위한 변수
+connection_successful=false
+
+echo -e "\n데이터베이스 연결 테스트 중..."
+for i in {1..30}; do
+    if docker-compose exec -T db mysql -u root -p${DB_ROOT_PASSWORD} -e "SHOW DATABASES;" > /dev/null 2>&1; then
+        echo "데이터베이스 연결 성공!"
+        connection_successful=true
+        break
+    else
+        echo "데이터베이스 연결 대기 중... (시도 $i/30, 5초 간격)"
+        sleep 5
+    fi
+done
+
+# 연결 상태 확인
+if [ "$connection_successful" = false ]; then
+    echo "데이터베이스 연결 실패. 컨테이너를 중지하고 로그를 확인합니다."
+    docker-compose logs db
+    echo "컨테이너를 중지하시겠습니까? (y/n)"
+    read -p "> " stop_containers
+    if [[ $stop_containers == [yY] ]]; then
+        docker-compose down
+        echo "컨테이너가 중지되었습니다."
+    fi
+    exit 1
+fi
+
+# 연결이 성공한 경우에만 계속 진행
+echo "데이터베이스 연결이 확인되었습니다. 다음 단계로 진행합니다."
 
 # 설치 완료 메시지
 echo -e "\n===========================================
