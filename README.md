@@ -57,21 +57,29 @@ sudo mysql_secure_installation
 
 #### 설정 과정:
 1. `Enter current password for root:` → **그냥 Enter**
-2. `Switch to unix_socket authentication [Y/n]:` → **Y**
+2. `Switch to unix_socket authentication [Y/n]:` → **N**
 3. `Change the root password? [Y/n]:` → **Y** (원하는 root 비밀번호 입력)
 4. `Remove anonymous users? [Y/n]:` → **Y**
 5. `Disallow root login remotely? [Y/n]:` → **Y**
 6. `Remove test database and access to it? [Y/n]:` → **Y**
 7. `Reload privilege tables now? [Y/n]:` → **Y**
 
+2번 관련 - 현재 Unix Socket 인증(unix_socket)을 사용 중이라면?
+✅ n 선택 (비밀번호 변경 필요 없음)
+✅ 대신 비밀번호 인증 방식으로 변경하려면 Y
+
+현재 비밀번호 인증(mysql_native_password)을 사용 중이라면?
+✅ 비밀번호를 변경하려면 Y 선택
+✅ 기존 비밀번호를 유지하려면 n 선택
+
 #### WordPress 데이터베이스 생성:
 ```bash
 sudo mysql -u root -p
 ```
 ```sql
-CREATE DATABASE wordpress DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER 'wordpress'@'localhost' IDENTIFIED BY '원하는비밀번호';
-GRANT ALL ON wordpress.* TO 'wordpress'@'localhost';
+CREATE DATABASE <db_name> DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER '<db_user>'@'localhost' IDENTIFIED BY '원하는비밀번호';
+GRANT ALL ON <db_name>.* TO '<db_user>'@'localhost';
 FLUSH PRIVILEGES;
 EXIT;
 ```
