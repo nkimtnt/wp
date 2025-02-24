@@ -78,7 +78,7 @@ mkdir -p /var/www/wordpress
 cd /tmp
 curl -O https://wordpress.org/latest.tar.gz
 tar xzvf latest.tar.gz
-cp -R wordpress/* /var/www/wordpress/
+mv wordpress /var/www/wordpress
 chown -R www-data:www-data /var/www/wordpress
 chmod -R 755 /var/www/wordpress
 
@@ -86,7 +86,25 @@ chmod -R 755 /var/www/wordpress
 echo -e "\n=== Nginx 설정 ==="
 read -p "도메인 이름을 입력하세요 (예: example.com): " domain_name
 
-cat > /etc/nginx/sites-available/wordpress << EOL
+# Nginx 설정 파일 생성
+echo -e "\n=== Nginx 설정 파일 생성 ==="
+NGINX_CONF="/etc/nginx/sites-available/wordpress"
+
+# 설정 파일 디렉토리 확인
+if [ ! -d "/etc/nginx/sites-available" ]; then
+    mkdir -p /etc/nginx/sites-available
+fi
+
+# 기존 설정 파일이 있다면 백업
+if [ -f "$NGINX_CONF" ]; then
+    mv "$NGINX_CONF" "${NGINX_CONF}.backup.$(date +%Y%m%d%H%M%S)"
+fi
+
+# 새 설정 파일 생성
+touch "$NGINX_CONF"
+
+# 설정 내용 작성
+cat > "$NGINX_CONF" << EOL
 server {
     listen 80;
     listen [::]:80;
