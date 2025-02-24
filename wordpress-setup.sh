@@ -60,8 +60,7 @@ apt install -y php8.2-fpm php8.2-mysql php8.2-curl php8.2-gd php8.2-mbstring php
 # PHP 설정
 echo -e "\n=== PHP 설정 ==="
 PHP_INI="/etc/php/8.2/fpm/php.ini"
-# awk를 사용하여 2번째 occurrence만 변경
-awk '!/^;/ && /short_open_tag = Off/ {count++} count==2 {sub(/short_open_tag = Off/, "short_open_tag = On")} {print}' $PHP_INI > tmp.ini && mv tmp.ini $PHP_INI
+sed -i '0,/^short_open_tag = Off/{s/^short_open_tag = Off/short_open_tag = On/}' $PHP_INI
 sed -i 's/^memory_limit.*/memory_limit = 256M/' $PHP_INI
 sed -i 's/^;cgi.fix_pathinfo.*/cgi.fix_pathinfo = 0/' $PHP_INI
 sed -i 's/^upload_max_filesize.*/upload_max_filesize = 100M/' $PHP_INI
