@@ -118,4 +118,27 @@ sudo certbot --nginx -d yourdomain.com -d www.yourdomain.com
 - **SSL 인증서 발급 시 Cloudflare 프록시를 반드시 비활성화해야 합니다.**
 - **Cloudflare 프록시 사용 시 SSL/TLS 설정은 반드시 '전체(엄격)' 모드여야 합니다.**
 
+WordPress 보안 키(SALT) 설정
 
+WordPress의 wp-config.php 파일에 보안 키를 설정해야 합니다. WordPress에서 제공하는 Salt Key 생성기를 사용하여 고유한 값을 생성합니다.
+
+보안 키 생성 방법
+
+웹 브라우저에서 직접 방문:https://api.wordpress.org/secret-key/1.1/salt/
+
+터미널에서 curl을 사용하여 가져오기:
+
+curl -s https://api.wordpress.org/secret-key/1.1/salt/
+
+생성된 값을 wp-config.php 파일의 기존 키 값과 교체합니다. 예제:
+
+define('AUTH_KEY',         'K]BT-d:++B|[WeVk3A$j+yZ5+4G_o$J76L24/~4-YB|-gG7Yw4');
+define('SECURE_AUTH_KEY',  'bhf4:q|o4/5.R`P7L6|5?8yR`_2S{m$G9f~S!');
+define('LOGGED_IN_KEY',    '$G*RZ6G{dnz4~6>8wK3D=');
+define('NONCE_KEY',        'random-value');
+define('AUTH_SALT',        'random-value');
+define('SECURE_AUTH_SALT', 'random-value');
+define('LOGGED_IN_SALT',   'random-value');
+define('NONCE_SALT',       'random-value');
+
+이 설정을 통해 WordPress의 보안이 강화됩니다.
